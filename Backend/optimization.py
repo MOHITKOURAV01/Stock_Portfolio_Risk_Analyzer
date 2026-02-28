@@ -1,6 +1,6 @@
 import numpy as np
 from scipy.optimize import minimize
-from risk_metrics import calculate_annualized_performance, calculate_sharpe_ratio
+from Backend.risk_metrics import calculate_annualized_performance, calculate_sharpe_ratio
 
 def optimize_portfolio(mean_returns, cov_matrix, risk_free_rate=0.02, objective='sharpe'):
     num_assets = len(mean_returns)
