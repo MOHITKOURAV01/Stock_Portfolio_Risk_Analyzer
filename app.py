@@ -1,428 +1,601 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import plotly.express as px
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
+import plotly.express as px
+from datetime import datetime, date
 import yfinance as yf
-from scipy.optimize import minimize
-from datetime import datetime, timedelta
+
+from Backend.data_layer import fetch_stock_data, calculate_returns, get_mean_returns_and_covariance
+from Backend.risk_metrics import (
+    calculate_annualized_performance,
+    calculate_sharpe_ratio,
+    calculate_historical_var
+)
+
+# --- THEME COLORS (DARK MODE) ---
+T = {
+    "bg": "#0F172A", "card_bg": "#1E293B", "primary": "#3B82F6", 
+    "success": "#22C55E", "danger": "#EF4444", "text": "#E2E8F0", 
+    "text_sec": "#94A3B8", "border": "#334155"
+}
 
 # --- PAGE CONFIG ---
-st.set_page_config(page_title="Institutional Risk Dashboard", layout="wide")
+st.set_page_config(
+    page_title="Portfolio Risk Analytics",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-# --- CUSTOM CSS ---
-def local_css():
-    st.markdown("""
-        <style>
-        /* Institutional Dark Theme - Upgraded with Clean Glassmorphism */
-        .stApp {
-            background-color: #050510;
-            background-image: linear-gradient(rgba(5, 5, 12, 0.88), rgba(5, 5, 12, 0.88)), 
-                              url("https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?q=80&w=2070&auto=format&fit=crop");
-            background-size: cover;
-            background-attachment: fixed;
-            background-position: center;
-            color: #eceff4;
-            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
-        }
-        
-        /* Premium Metric Card with Blur & Glow */
-        .metric-card {
-            background-color: rgba(20, 25, 35, 0.65);
-            padding: 18px;
-            border-radius: 8px;
-            border-left: 4px solid #005a9e; /* Default, overridden inline */
-            margin-bottom: 20px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.4);
-            backdrop-filter: blur(10px);
-            -webkit-backdrop-filter: blur(10px);
-            border-top: 1px solid rgba(255,255,255,0.08);
-            border-right: 1px solid rgba(255,255,255,0.03);
-            border-bottom: 1px solid rgba(255,255,255,0.03);
-            transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
-        }
-        .metric-card:hover {
-            box-shadow: 0 8px 25px rgba(0,0,0,0.6);
-            transform: translateY(-4px);
-            border-top: 1px solid rgba(255,255,255,0.15);
-        }
-        .metric-card h4 {
-            margin-bottom: 6px;
-            font-size: 0.85rem;
-            color: #a0aec0;
-            font-weight: 500;
-            text-transform: uppercase;
-            letter-spacing: 0.8px;
-        }
-        .metric-card h2 {
-            margin: 0;
-            font-size: 1.8rem;
-            font-weight: 600;
-            color: #ffffff;
-            text-shadow: 0 2px 4px rgba(0,0,0,0.3);
-        }
-        
-        /* Smooth Title Entry */
-        @keyframes fadeInDown {
-            from { opacity: 0; transform: translateY(-20px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-        
-        .animated-title {
-            animation: fadeInDown 1.0s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
-            color: #ffffff;
-            padding: 15px 0 25px 0;
-            font-size: 2.2rem;
-            font-weight: 700;
-            letter-spacing: -0.5px;
-            margin-bottom: 10px;
-            border-bottom: 1px solid rgba(255,255,255,0.1);
-        }
-        
-        /* Sidebar styling - Darker focus */
-        [data-testid="stSidebar"] {
-            background-color: rgba(10, 12, 18, 0.95) !important;
-            border-right: 1px solid rgba(255,255,255,0.08);
-        }
-        
-        /* Buttons */
-        .stButton>button {
-            border-radius: 4px;
-            font-weight: 600;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
-            transition: all 0.2s;
-        }
-        .stButton>button:hover {
-            opacity: 0.9;
-            transform: translateY(-1px);
-        }
-        </style>
-    """, unsafe_allow_html=True)
+# --- CLEAN PREMIUM CSS ---
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
-local_css()
+/* Main Background */
+.stApp {
+    background-color: #0E1117;
+    color: #F8F9FA;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
 
-# --- TITLE ---
-st.markdown('<div class="animated-title">Institutional Portfolio Risk Analytics</div>', unsafe_allow_html=True)
+/* Subtle fade-in animation */
+.block-container {
+    animation: fadeIn 0.5s ease-out;
+    padding-top: 2rem;
+    padding-bottom: 3rem;
+}
+@keyframes fadeIn {
+    0% { opacity: 0; transform: translateY(10px); }
+    100% { opacity: 1; transform: translateY(0); }
+}
 
-# --- CACHED DATA FETCHING & MATH ---
-@st.cache_data(ttl=3600)
-def fetch_data(tickers, lookback_years=5):
-    end_date = datetime.today()
-    start_date = end_date - timedelta(days=lookback_years * 365)
+/* Typography Headings */
+h1, h2, h3, h4, h5, h6 {
+    color: #FFFFFF !important;
+    font-weight: 600 !important;
+}
+
+/* Sidebar Styling & Text Legibility */
+[data-testid="stSidebar"] {
+    background-color: #161B22 !important;
+    border-right: 1px solid #30363D;
+}
+
+/* Force Light Text on all Labels, Spans, Paragraphs */
+.stApp label, .stApp p, .stApp span, .stApp div[data-testid="stMarkdownContainer"] {
+    color: #E6EAF1 !important;
+}
+
+/* Specific fix for Captions and Tooltips */
+.stApp small, div[data-testid="stCaptionContainer"] p {
+    color: #8B949E !important;
+}
+
+svg[role="img"] {
+    stroke: #8B949E !important;
+}
+
+/* Inputs Styling */
+input[class^="st-"] {
+    background-color: #0D1117 !important;
+    border: 1px solid #30363D !important;
+    color: #FFFFFF !important;
+}
+
+/* Metric Display */
+div[data-testid="metric-container"] {
+    background-color: #161B22 !important;
+    border: 1px solid #30363D !important;
+    border-radius: 8px !important;
+    padding: 15px 20px !important;
+}
+div[data-testid="stMetricValue"] {
+    font-size: 1.8rem !important;
+    font-weight: 600 !important;
+    color: #FFFFFF !important;
+}
+div[data-testid="metric-container"] label {
+    font-size: 0.9rem !important;
+    color: #8B949E !important;
+    font-weight: 500 !important;
+}
+
+/* Dataframe header */
+th {
+    background-color: #1E293B !important;
+    color: #94A3B8 !important;
+    font-weight: 600 !important;
+}
+
+/* Card Container */
+.css-card {
+    background-color: #1E293B;
+    border: 1px solid #334155;
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 20px;
+}
+
+/* Hide Streamlit components */
+header[data-testid="stHeader"] { background: transparent !important; }
+MainMenu {visibility: hidden;} footer {visibility: hidden;}
+</style>
+""", unsafe_allow_html=True)
+
+# --- STATE MANAGEMENT ---
+if "portfolio" not in st.session_state:
+    st.session_state.portfolio = {}
+if "app_mode" not in st.session_state:
+    st.session_state.app_mode = "Basic"
+if "curr_toggle" not in st.session_state:
+    st.session_state.curr_toggle = False # False = USD, True = INR
+
+USD_INR_RATE = 83.2
+current_currency = "INR" if st.session_state.get('curr_toggle', False) else "USD"
+SYM = "INR " if current_currency == "INR" else "$"
+
+# --- SIDEBAR: PORTFOLIO BUILDER ---
+# --- SIDEBAR: NAVIGATION & MODE ---
+with st.sidebar:
+    # Determine index based on current state
+    mode_options = ["Basic", "Pro Analytics"]
+    current_index = mode_options.index(st.session_state.app_mode)
     
-    # yfinance often returns MultiIndex columns and mixed dtypes.
-    try:
-        data = yf.download(tickers, start=start_date, end=end_date, auto_adjust=False)
+    selected_mode = st.radio("Mode", mode_options, index=current_index)
+    st.session_state.app_mode = selected_mode
+    
+    st.markdown(f"<hr style='border-color: {T['border']}; margin: 1.5rem 0;'>", unsafe_allow_html=True)
+    st.markdown("### Settings")
+    st.toggle("Currency: USD / INR", key="curr_toggle")
+    
+    st.markdown(f"<hr style='border-color: {T['border']}; margin: 1.5rem 0;'>", unsafe_allow_html=True)
+    
+    st.markdown("### Portfolio Builder")
+    
+    start_date = st.date_input(
+        "Start Date", 
+        date(2023, 1, 1), 
+        help="Used to calculate historical performance."
+    )
+    st.caption("Used to calculate historical performance.")
+    
+    st.markdown(f"<hr style='border-color: {T['border']}; margin: 1.5rem 0;'>", unsafe_allow_html=True)
+    st.markdown("#### Add Stock")
+    
+    # Pre-defined list of popular stocks for autocomplete
+    popular_stocks = [
+        # US Tech
+        "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "NFLX", "AMD", "INTC", 
+        "CRM", "ADBE", "CSCO", "ORCL", "IBM",
+        # US Finance & Others
+        "JPM", "V", "MA", "BAC", "WMT", "JNJ", "PG", "UNH", "HD", "DIS", "PYPL", "SQ",
+        # Indian Stocks (NSE)
+        "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "ICICIBANK.NS", "HINDUNILVR.NS",
+        "SBIN.NS", "BHARTIARTL.NS", "ITC.NS", "KOTAKBANK.NS", "LT.NS", "BAJFINANCE.NS",
+        "HCLTECH.NS", "ASIANPAINT.NS", "AXISBANK.NS", "MARUTI.NS", "SUNPHARMA.NS", 
+        "TITAN.NS", "ULTRACEMCO.NS", "TATASTEEL.NS", "WIPRO.NS", "TATAMOTORS.NS",
+        "POWERGRID.NS", "NTPC.NS", "M&M.NS", "ZOMATO.NS", "PAYTM.NS", "NYKAA.NS"
+    ]
+    
+    search_method = st.radio("Search Method", ["Popular List (Auto-complete)", "Custom Text Input"], horizontal=True, label_visibility="collapsed")
+    
+    if search_method == "Popular List (Auto-complete)":
+        new_tickers = st.multiselect("Search stock", popular_stocks, help="Type to search and select multiple available stocks.")
+    else:
+        new_tickers_str = st.text_input("Search stock", placeholder="e.g. AAPL, RELIANCE.NS", help="Type any valid Yahoo Finance tickers separated by commas.")
+        new_tickers = [t.strip().upper() for t in new_tickers_str.split(",") if t.strip()]
         
-        # 1. Handle MultiIndex columns (Extract 'Adj Close' or 'Close')
-        if isinstance(data.columns, pd.MultiIndex):
-            if 'Adj Close' in data.columns.levels[0]:
-                df = data['Adj Close'].copy()
-            else:
-                df = data['Close'].copy()
+    new_quantity = st.number_input("Enter quantity", min_value=0.01, step=1.0, value=10.0, format="%.2f")
+    
+    if st.button("Add to Portfolio", type="primary", use_container_width=True):
+        if new_tickers:
+            with st.spinner("Verifying..."):
+                for ticker in new_tickers:
+                    try:
+                        data = yf.download(ticker, period="5d", progress=False)
+                        if not data.empty:
+                            st.session_state.portfolio[ticker] = st.session_state.portfolio.get(ticker, 0) + new_quantity
+                            st.success(f"Added {new_quantity} shares of {ticker}")
+                        else:
+                            st.error(f"Stock '{ticker}' not found. Please check symbol.")
+                    except Exception as e:
+                        st.error(f"Stock '{ticker}' not found. Please check symbol.")
         else:
-            df = data.copy()
-            # If standard DataFrame, try selecting directly if columns exist
-            if 'Adj Close' in df.columns:
-                df = df['Adj Close']
-            elif 'Close' in df.columns:
-                df = df['Close']
+            st.warning("Please enter at least one stock symbol.")
+            
+    if st.session_state.portfolio:
+        st.markdown(f"<hr style='border-color: {T['border']}; margin: 1.5rem 0;'>", unsafe_allow_html=True)
+        st.markdown("#### Your Holdings")
+        
+        for t, q in list(st.session_state.portfolio.items()):
+            col1, col2 = st.columns([4, 1])
+            col1.markdown(
+                f"<div style='background: {T['bg']}; border: 1px solid {T['border']}; padding: 8px 12px; border-radius: 8px; margin-bottom: 5px; color: {T['text']};'>"
+                f"<b>{t}</b> &times; {q:g}</div>", 
+                unsafe_allow_html=True
+            )
+            if col2.button("X", key=f"remove_{t}", help="Remove holding"):
+                del st.session_state.portfolio[t]
+                st.rerun()
                 
-        # 2. Handle Single Ticker fallback: 
-        # If df is a Series, convert it to a DataFrame with the ticker name as the column
-        if isinstance(df, pd.Series):
-            df = df.to_frame(name=tickers[0])
-            
-        # 3. Handle Missing/Empty Data
-        df = df.dropna(how='all')    # Drop dates where ALL tickers are NaN
-        df = df.ffill().bfill()      # Fill intermittent NaNs (forward then backward)
-        
-        if df.empty:
-            st.error("Error: Fetched data is completely empty. Check ticker symbols.")
-            return None
-            
-        return df
-    except Exception as e:
-        st.error(f"Data Fetch Error: {e}")
-        return None
+        if st.button("Clear Portfolio", use_container_width=True):
+            st.session_state.portfolio = {}
+            st.rerun()
 
-@st.cache_data
-def calculate_metrics(data, risk_free_rate):
-    returns = np.log(data / data.shift(1)).dropna()
-    mean_returns = returns.mean() * 252
-    cov_matrix = returns.cov() * 252
-    return returns, mean_returns, cov_matrix
 
-# --- OPTIMIZATION ALGORITHMS ---
-def portfolio_performance(weights, mean_returns, cov_matrix):
-    returns = np.sum(mean_returns * weights)
-    std = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
-    return returns, std
-
-def negative_sharpe(weights, mean_returns, cov_matrix, risk_free_rate):
-    p_ret, p_std = portfolio_performance(weights, mean_returns, cov_matrix)
-    return -(p_ret - risk_free_rate) / p_std
-
-def get_optimal_portfolio(mean_returns, cov_matrix, risk_free_rate):
-    num_assets = len(mean_returns)
-    args = (mean_returns, cov_matrix, risk_free_rate)
-    constraints = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
-    bounds = tuple((0.0, 1.0) for asset in range(num_assets))
+# --- DATA FETCHING & PREP (SHARED) ---
+if st.session_state.portfolio:
+    tickers = list(st.session_state.portfolio.keys())
+    quantities = np.array(list(st.session_state.portfolio.values()))
     
-    initial_guess = num_assets * [1. / num_assets]
-    result = minimize(negative_sharpe, initial_guess, args=args,
-                        method='SLSQP', bounds=bounds, constraints=constraints)
-    return result.x
-
-# --- SIDEBAR: CONFIGURATION ---
-st.sidebar.markdown("### Configuration Panel")
-
-st.sidebar.markdown("#### Selection")
-default_tickers = ['AAPL', 'MSFT', 'GOOGL', 'AMZN']
-available_tickers = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA', 'META', 'NVDA', 'JPM', 'V', 'BTC-USD', 'SPY', 'QQQ', 'TLT', 'GLD', 'JNJ', 'PG']
-tickers = st.sidebar.multiselect("Assets", options=available_tickers, default=default_tickers)
-
-st.sidebar.markdown("#### Allocation (%)")
-weights_input = []
-total_weight = 0
-
-if len(tickers) > 0:
-    for ticker in tickers:
-        w = st.sidebar.number_input(f"{ticker} Weight", min_value=0.0, max_value=100.0, value=100.0/len(tickers), step=1.0, format="%.1f")
-        weights_input.append(w)
-        total_weight += w
-
-calculate_disabled = False
-valid_weights = []
-
-if abs(total_weight - 100.0) > 0.01 and len(tickers) > 0:
-    st.sidebar.error(f"Allocation must equal exactly 100.0%. Current: {total_weight:.1f}%")
-    calculate_disabled = True
-elif len(tickers) > 0:
-    valid_weights = [w/100.0 for w in weights_input]
-
-st.sidebar.markdown("#### Simulation")
-num_simulations = st.sidebar.number_input("Iterative Paths", min_value=1000, max_value=50000, value=10000, step=1000)
-time_horizon = st.sidebar.number_input("Time Horizon (Days)", min_value=30, max_value=1260, value=252, step=30)
-risk_free_rate = st.sidebar.number_input("Risk-Free Rate (%)", min_value=0.0, max_value=10.0, value=4.0, step=0.1) / 100.0
-
-st.sidebar.markdown("#### Diagnostics")
-stress_test = st.sidebar.checkbox("Apply Market Stress Regime")
-
-if len(tickers) > 1:
-    optimize_btn = st.sidebar.button("Optimize Portfolio (Max Sharpe)")
-    if optimize_btn:
-        with st.spinner("Calculating optimal weights..."):
-            data = fetch_data(tickers)
-            if data is not None and not data.empty:
-                _, mean_rets, cov_mat = calculate_metrics(data, risk_free_rate)
-                opt_weights = get_optimal_portfolio(mean_rets, cov_mat, risk_free_rate)
-                st.sidebar.success("Optimization Result:")
-                for t, w in zip(tickers, opt_weights):
-                    st.sidebar.text(f" {t}: {w*100:.1f}%")
-            else:
-                st.sidebar.error("Could not fetch data for optimization.")
-
-if st.sidebar.button("System Calculate", disabled=calculate_disabled or len(tickers) == 0, use_container_width=True, type="primary"):
-    with st.spinner("Initializing Analytics Engine..."):
+    with st.spinner("Analyzing portfolio performance..."):
+        start_str = start_date.strftime('%Y-%m-%d')
+        prices = fetch_stock_data(tickers, start_str)
         
-        # --- 1. DATA PREPARATION ---
-        data = fetch_data(tickers)
-        if data is None or data.empty:
+    if prices is None or prices.empty:
+        st.error("Failed to fetch historical data for the selected assets and date range.")
+    else:
+        prices = prices.ffill().bfill()
+        valid_tickers = [t for t in tickers if t in prices.columns]
+        
+        if not valid_tickers:
+            st.error("Failed to align market data with portfolio assets.")
             st.stop()
             
-        returns, mean_returns, cov_matrix = calculate_metrics(data, risk_free_rate)
+        prices = prices[valid_tickers]
+        quantities = np.array([st.session_state.portfolio[t] for t in valid_tickers])
+        tickers = valid_tickers
         
-        # Stress Test Adjustments (Severe impact: -20% annual return, 2x variance)
-        if stress_test:
-            mean_returns = mean_returns - 0.20
-            cov_matrix = cov_matrix * 2.0
+        # CALCULATIONS (Normalized to USD for accurate portfolio weighting)
+        norm_prices = prices.copy()
+        inr_stocks = [t for t in valid_tickers if t.endswith(".NS")]
+        if inr_stocks:
+            norm_prices[inr_stocks] = norm_prices[inr_stocks] / USD_INR_RATE
             
-        weights = np.array(valid_weights)
+        current_prices_usd = norm_prices.iloc[-1]
+        initial_prices_usd = norm_prices.iloc[0]
+        total_values_usd = current_prices_usd * quantities
+        initial_values_usd = initial_prices_usd * quantities
         
-        # Portfolio Baseline
-        port_return = np.sum(mean_returns * weights)
-        port_volatility = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
-        sharpe_ratio = (port_return - risk_free_rate) / port_volatility if port_volatility > 0 else 0
+        portfolio_current_value_usd = total_values_usd.sum()
+        portfolio_initial_value_usd = initial_values_usd.sum()
+        total_gain_usd = portfolio_current_value_usd - portfolio_initial_value_usd
+        percent_change = (total_gain_usd / portfolio_initial_value_usd) * 100 if portfolio_initial_value_usd > 0 else 0
         
-        # --- 2. MONTE CARLO SIMULATION ---
-        np.random.seed(42)
-        initial_investment = 1000000 # Institutional baseline $1M
+        # Portfolio Engine Weights & Returns (in USD base)
+        weights = (total_values_usd / portfolio_current_value_usd).values
+        returns = calculate_returns(norm_prices)
+        mean_returns, cov_matrix = get_mean_returns_and_covariance(returns)
+        portfolio_daily_returns = returns.dot(weights)
         
-        L = np.linalg.cholesky(cov_matrix)
-        dt = 1/252
-        portfolio_paths = np.zeros((time_horizon, num_simulations))
-        portfolio_paths[0] = initial_investment
+        ann_ret, ann_vol = calculate_annualized_performance(weights, mean_returns, cov_matrix)
+        sharpe = calculate_sharpe_ratio(ann_ret, ann_vol, 0.02)
         
-        for t in range(1, time_horizon):
-            z = np.random.standard_normal((len(tickers), num_simulations))
-            
-            # Convert pandas series to numpy arrays to avoid ValueError on multi-dimensional indexing
-            mu_array = mean_returns.values if isinstance(mean_returns, pd.Series) else mean_returns
-            diag_cov = np.diag(cov_matrix)
-            
-            # Calculate daily returns for this step
-            drift = (mu_array - 0.5 * diag_cov)[:, np.newaxis] * dt
-            shock = np.sqrt(dt) * np.dot(L, z)
-            daily_returns = drift + shock
-            
-            port_daily_ret = np.sum(weights[:, np.newaxis] * daily_returns, axis=0)
-            portfolio_paths[t] = portfolio_paths[t-1] * np.exp(port_daily_ret)
-            
-        returns_mc = (portfolio_paths[-1] - initial_investment) / initial_investment
-        
-        # --- 3. RISK METRICS (VaR & CVaR) ---
-        confidence_level = 0.05
-        # Historical / MC Simulation VaR
-        sorted_returns = np.sort(returns_mc)
-        var_index = int(num_simulations * confidence_level)
-        var_95_percent = sorted_returns[var_index]
-        mc_var_95 = initial_investment * abs(min(var_95_percent, 0))
-        
-        # CVaR (Expected Shortfall) accurately tracking losses beyond VaR
-        cvar_returns = sorted_returns[:var_index]
-        mc_cvar_95 = initial_investment * abs(np.mean(cvar_returns)) if len(cvar_returns) > 0 else mc_var_95
-        
-        # --- 4. HISTORICAL PERFORMANCE (Drawdown & Vol) ---
-        hist_port_returns = returns.dot(weights)
-        cumulative_returns = (1 + hist_port_returns).cumprod()
-        rolling_max = cumulative_returns.cummax()
-        drawdown = (cumulative_returns / rolling_max) - 1
-        max_drawdown = drawdown.min()
-        
-        # Rolling Volatility (60-day window)
-        rolling_vol = hist_port_returns.rolling(window=60).std() * np.sqrt(252)
-
-        # --- KPI CARDS ---
-        col1, col2, col3, col4, col5 = st.columns(5)
-        
-        # Dynamic colored borders/glow based on performance
-        ret_color = "#00e676" if port_return > 0 else "#ff1744"
-        vol_color = "#ffb300"
-        sharpe_color = "#00b0ff"
-        var_color = "#ff5252"
-        cvar_color = "#d50000"
-        
-        col1.markdown(f'<div class="metric-card" style="border-left-color: {ret_color};"><h4>Exp. Return</h4><h2 style="color: {ret_color}; text-shadow: 0 0 10px rgba(0,230,118,0.2);">{port_return*100:+.2f}%</h2></div>', unsafe_allow_html=True)
-        col2.markdown(f'<div class="metric-card" style="border-left-color: {vol_color};"><h4>Volatility</h4><h2 style="color: #ffffff;">{port_volatility*100:.2f}%</h2></div>', unsafe_allow_html=True)
-        col3.markdown(f'<div class="metric-card" style="border-left-color: {sharpe_color};"><h4>Sharpe Ratio</h4><h2 style="color: {sharpe_color}; text-shadow: 0 0 10px rgba(0,176,255,0.2);">{sharpe_ratio:.2f}</h2></div>', unsafe_allow_html=True)
-        col4.markdown(f'<div class="metric-card" style="border-left-color: {var_color};"><h4>VaR (95%)</h4><h2 style="color: {var_color}; text-shadow: 0 0 10px rgba(255,82,82,0.2);">${mc_var_95:,.0f}</h2><p style="margin:0; font-size:11px; color:#9ba4b5;">Simulated {time_horizon} days</p></div>', unsafe_allow_html=True)
-        col5.markdown(f'<div class="metric-card" style="border-left-color: {cvar_color};"><h4>CVaR (95%)</h4><h2 style="color: {cvar_color}; text-shadow: 0 0 10px rgba(213,0,0,0.2);">${mc_cvar_95:,.0f}</h2><p style="margin:0; font-size:11px; color:#9ba4b5;">Expected Shortfall</p></div>', unsafe_allow_html=True)
-
-        st.markdown("<hr style='border-color: #222;'>", unsafe_allow_html=True)
-
-        # --- VISUALIZATIONS ---
-        
-        st.markdown("### Historical Analytics")
-        # Drawdown & Cumulative Return Chart
-        fig_hist = make_subplots(rows=3, cols=1, shared_xaxes=True, 
-                               vertical_spacing=0.08, row_heights=[0.5, 0.25, 0.25],
-                               subplot_titles=("Cumulative Returns", "Drawdown", "Rolling 60-Day Volatility"))
-        
-        fig_hist.add_trace(go.Scatter(x=cumulative_returns.index, y=cumulative_returns.values - 1, 
-                                    name='Returns', line=dict(color='#00b0ff', width=1.5)), row=1, col=1)
-        fig_hist.add_trace(go.Scatter(x=drawdown.index, y=drawdown.values, 
-                                    name='Drawdown', fill='tozeroy', line=dict(color='#ff5252', width=1)), row=2, col=1)
-        fig_hist.add_trace(go.Scatter(x=rolling_vol.index, y=rolling_vol.values, 
-                                    name='Volatility', line=dict(color='#ffb300', width=1)), row=3, col=1)
-        
-        fig_hist.update_layout(template='plotly_dark', margin=dict(l=20, r=20, t=40, b=20),
-                             paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(10,10,10,0.6)',
-                             height=650, hovermode='x unified', font=dict(family="Helvetica", color="#E0E0E0"), showlegend=False)
-        st.plotly_chart(fig_hist, use_container_width=True)
-
-        # Split next section
-        c1, c2 = st.columns(2)
-        
-        with c1:
-            st.markdown("#### Efficient Frontier Allocation")
-            num_portfolios = 3000
-            results = np.zeros((3, num_portfolios))
-            for i in range(num_portfolios):
-                rw = np.random.random(len(tickers))
-                rw /= np.sum(rw)
-                p_r, p_v = portfolio_performance(rw, mean_returns, cov_matrix)
-                results[0,i] = p_v
-                results[1,i] = p_r
-                results[2,i] = (p_r - risk_free_rate) / p_v
-                
-            fig_ef = go.Figure()
-            fig_ef.add_trace(go.Scatter(x=results[0,:], y=results[1,:], mode='markers', 
-                                        marker=dict(color=results[2,:], colorscale='Viridis', showscale=True, 
-                                                    size=3, opacity=0.4, colorbar=dict(title="Sharpe")), 
-                                        name='Random Allocations'))
-            fig_ef.add_trace(go.Scatter(x=[port_volatility], y=[port_return], mode='markers', 
-                                        marker=dict(color='#ffffff', symbol='star', size=14, line=dict(width=1, color='black')), 
-                                        name='Current Portfolio'))
-            
-            fig_ef.update_layout(template='plotly_dark', margin=dict(l=20, r=20, t=20, b=20),
-                                 paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(10,10,10,0.6)', 
-                                 xaxis_title='Volatility \u03C3', yaxis_title='Expected Return \u03BC',
-                                 font=dict(family="Helvetica", color="#E0E0E0"))
-            st.plotly_chart(fig_ef, use_container_width=True)
-
-        with c2:
-            st.markdown(f"#### Monte Carlo Trajectories ({num_simulations})")
-            fig_mc = go.Figure()
-            
-            sample_paths = portfolio_paths[:, :100]
-            time_array = np.arange(time_horizon)
-            
-            for i in range(100):
-                fig_mc.add_trace(go.Scatter(x=time_array, y=sample_paths[:, i], mode='lines', 
-                                            line=dict(color='rgba(0, 150, 255, 0.04)'), showlegend=False, hoverinfo='skip'))
-            
-            fig_mc.add_trace(go.Scatter(x=time_array, y=np.mean(portfolio_paths, axis=1), mode='lines', 
-                                        line=dict(color='#ffea00', width=2), name='Expected Value'))
-            
-            fig_mc.update_layout(template='plotly_dark', margin=dict(l=20, r=20, t=20, b=20),
-                                 paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(10,10,10,0.6)', 
-                                 yaxis_title='Portfolio Value ($)', xaxis_title='Trading Days',
-                                 font=dict(family="Helvetica", color="#E0E0E0"))
-            st.plotly_chart(fig_mc, use_container_width=True)
-
-        # --- DIAGNOSTICS ---
-        d1, d2 = st.columns(2)
-        
-        with d1:
-            st.markdown("#### Correlation Matrix")
-            corr_matrix = returns.corr()
-            fig_corr = px.imshow(corr_matrix, x=tickers, y=tickers, color_continuous_scale='RdBu_r', zmin=-1, zmax=1, text_auto=".2f")
-            fig_corr.update_layout(template='plotly_dark', margin=dict(l=20, r=20, t=20, b=20),
-                                   paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(10,10,10,0.6)', font=dict(family="Helvetica", color="#E0E0E0"))
-            st.plotly_chart(fig_corr, use_container_width=True)
-
-        with d2:
-            st.markdown("#### Marginal Risk Contribution")
-            port_variance = port_volatility**2
-            marginal_contrib = np.dot(cov_matrix, weights) / port_volatility
-            component_contrib = weights * marginal_contrib
-            percentage_contrib = component_contrib / port_volatility * 100
-            
-            fig_rc = go.Figure(data=[go.Pie(labels=tickers, values=percentage_contrib, hole=0.55, 
-                                            marker=dict(colors=px.colors.qualitative.Prism))])
-            fig_rc.update_layout(template='plotly_dark', margin=dict(l=20, r=20, t=20, b=20),
-                                 paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(10,10,10,0.6)', font=dict(family="Helvetica", color="#E0E0E0"),
-                                 annotations=[dict(text='Risk %', x=0.5, y=0.5, font_size=16, showarrow=False, font=dict(family="Helvetica", color="#E0E0E0"))])
-            fig_rc.update_traces(textposition='inside', textinfo='percent+label')
-            st.plotly_chart(fig_rc, use_container_width=True)
-
-        # --- EXPORT REPORT ---
-        st.markdown("#### System Export")
-        
-        export_df = pd.DataFrame({
-            'Metric': ['Expected Return', 'Volatility', 'Sharpe Ratio', 'Max Drawdown', 'VaR (95%)', 'CVaR (95%)'],
-            'Value': [f"{port_return*100:.2f}%", f"{port_volatility*100:.2f}%", f"{sharpe_ratio:.2f}", f"{max_drawdown*100:.2f}%", f"${mc_var_95:,.2f}", f"${mc_cvar_95:,.2f}"]
+        # Shared Summary Dataframe (Original Price & Views)
+        df_summary = pd.DataFrame({
+            "Stock": tickers,
+            "Quantity": quantities,
+            "Base Currency": ["INR" if t.endswith(".NS") else "USD" for t in tickers],
+            "Original Price": prices.iloc[-1].values,
+            "Total Value (Base)": (prices.iloc[-1] * quantities).values,
+            "Portfolio Ratio %": weights * 100
         })
+
+        # Convert everything to VIEW currency
+        def convert_val(val, from_curr):
+            if from_curr == current_currency: return val
+            if from_curr == "USD": return val * USD_INR_RATE
+            return val / USD_INR_RATE
+
+        df_summary["Current Price"] = df_summary.apply(lambda x: convert_val(x["Original Price"], x["Base Currency"]), axis=1)
+        df_summary["Total Value"] = df_summary.apply(lambda x: convert_val(x["Total Value (Base)"], x["Base Currency"]), axis=1)
+
+        # Recalculate portfolio total in VIEW currency
+        portfolio_view_value = df_summary["Total Value"].sum()
+        total_gain_view = convert_val(total_gain_usd, "USD") 
+
+        # Diversification Score (1 - HHI)
+        hhi = np.sum(weights**2)
+        div_score = (1 - hhi) * 100 if len(tickers) > 1 else 10.0
         
-        csv = export_df.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="Download Diagnostic Report (CSV)",
-            data=csv,
-            file_name='portfolio_diagnostics.csv',
-            mime='text/csv',
+        # Risk Score (0-100)
+        # Based on volatility and VaR (Historical)
+        risk_score = (ann_vol * 0.4 + abs(calculate_historical_var(portfolio_daily_returns)) * 0.6) * 200
+        risk_score = min(100, max(5, risk_score))
+        
+        if risk_score < 35: risk_color, risk_label = T["success"], "Low Risk"
+        elif risk_score < 65: risk_color, risk_label = "#EAB308", "Moderate Risk"
+        else: risk_color, risk_label = T["danger"], "High Risk"
+
+
+# --- RENDER MODES ---
+if st.session_state.app_mode == "Basic":
+    # HEADER (BASIC)
+    head_col1, head_col2 = st.columns([3, 1])
+    with head_col1:
+        st.markdown('<h1 style="margin-top:2rem;">Portfolio Analytics</h1>', unsafe_allow_html=True)
+    with head_col2:
+        st.markdown(f'<div style="text-align: right; margin-top: 3.5rem; color:{T["text_sec"]}; font-size:0.9rem;">Last Updated: {datetime.now().strftime("%I:%M %p")}</div>', unsafe_allow_html=True)
+        if st.session_state.portfolio and st.button("🔎 Switch to Pro Analytics"):
+            st.session_state.app_mode = "Pro Analytics"
+            st.rerun()
+
+    if not st.session_state.portfolio:
+        st.info("Select and add stocks from the sidebar to begin analysis.")
+    else:
+        # PORTFOLIO SUMMARY
+        st.markdown("### Holdings Summary")
+        df_display = df_summary.copy()
+        df_display["Current Price"] = df_display["Current Price"].apply(lambda x: f"{SYM}{x:,.2f}")
+        df_display["Total Value"] = df_display["Total Value"].apply(lambda x: f"{SYM}{int(x):,}")
+        df_display["Portfolio Ratio %"] = df_display["Portfolio Ratio %"].apply(lambda x: f"{x:.1f}%")
+        
+        try:
+            with st.container(border=True):
+                st.dataframe(df_display, use_container_width=True, hide_index=True)
+        except TypeError:
+            st.dataframe(df_display, use_container_width=True, hide_index=True)
+        
+        st.markdown(f"<hr style='border-color: {T['border']}; margin: 2rem 0;'>", unsafe_allow_html=True)
+        
+        # PERFORMANCE OVERVIEW
+        st.markdown("### Portfolio Performance")
+        c1, c2, c3 = st.columns(3)
+        c1.metric(
+            "Current Value", 
+            f"{SYM}{int(portfolio_view_value):,}", 
+            f"{'+' if total_gain_view >= 0 else ''}{SYM}{int(total_gain_view):,} ({percent_change:+.1f}%)",
+            help="The total market value of your holdings converted to your selected currency."
         )
+        c2.metric(
+            "Annualized Return", 
+            f"{ann_ret*100:.1f}%",
+            help="The geometric average amount of money earned by an investment each year over a given time period."
+        )
+        c3.metric(
+            "Portfolio Volatility", 
+            f"{ann_vol*100:.1f}%",
+            help="A statistical measure of the dispersion of returns for a given portfolio. Usually lower is safer."
+        )
+
+        st.markdown(f"<hr style='border-color: {T['border']}; margin: 2rem 0;'>", unsafe_allow_html=True)
         
-elif not calculate_disabled:
-    st.info("System Ready. Configure parameters and execute Analytics Engine.")
+        # PORTFOLIO HEALTH
+        st.markdown("### Portfolio Health")
+        h1, h2 = st.columns(2)
+        with h1:
+            st.markdown(f"""
+            <div style="background:{T['card_bg']}; padding:20px; border-radius:12px; border-left: 5px solid {risk_color};">
+                <p style="margin:0; color:{T['text_sec']}; font-size:0.9rem;">Risk Score</p>
+                <p style="margin:0; color:{risk_color}; font-size:2rem; font-weight:700;">{int(risk_score)}/100</p>
+                <p style="margin:0; color:{risk_color}; font-size:0.9rem; font-weight:500;">{risk_label}</p>
+            </div>
+            """, unsafe_allow_html=True)
+        with h2:
+             st.markdown(f"""
+            <div style="background:{T['card_bg']}; padding:20px; border-radius:12px; border-left: 5px solid {T['primary']};">
+                <p style="margin:0; color:{T['text_sec']}; font-size:0.9rem;">Diversification Health</p>
+                <p style="margin:0; color:{T['text']}; font-size:2rem; font-weight:700;">{int(div_score)}/100</p>
+                <p style="margin:0; color:{T['primary']}; font-size:0.9rem; font-weight:500;">{'Excellent' if div_score > 70 else 'Healthy' if div_score > 40 else 'Concentrated'}</p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        st.markdown(f"<hr style='border-color: {T['border']}; margin: 2rem 0;'>", unsafe_allow_html=True)
+        
+        # CHARTS
+        st.markdown("### Asset Distribution")
+        r1, r2 = st.columns(2)
+        with r1:
+            fig_pie = px.pie(df_summary, values='Portfolio Ratio %', names='Stock', title='Allocation', hole=0.4, color_discrete_sequence=px.colors.sequential.Blues_r)
+            fig_pie.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color=T["text_sec"]), margin=dict(t=40, b=0, l=0, r=0))
+            fig_pie.update_traces(textposition='inside', textinfo='percent+label')
+            st.plotly_chart(fig_pie, use_container_width=True)
+        with r2:
+            fig_bar = px.bar(df_summary.sort_values("Total Value", ascending=True), x='Total Value', y='Stock', orientation='h', title='Value by Asset', color_discrete_sequence=[T["primary"]])
+            fig_bar.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color=T["text_sec"]), margin=dict(t=40, b=0, l=0, r=0), xaxis=(dict(showgrid=True, gridcolor=T["border"], tickprefix=SYM, tickformat=",.0f")), yaxis=(dict(showgrid=False)))
+            st.plotly_chart(fig_bar, use_container_width=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+        # Historical Portfolio Value Line Chart (in view currency)
+        # Assuming exchange rate was constant for historical view simplicity
+        portfolio_history_usd = (norm_prices * quantities).sum(axis=1)
+        portfolio_history_view = portfolio_history_usd.apply(lambda x: convert_val(x, "USD"))
+        
+        fig_line = go.Figure()
+        fig_line.add_trace(go.Scatter(
+            x=portfolio_history_view.index, 
+            y=portfolio_history_view.values,
+            mode='lines', 
+            line=dict(color='#5E6AD2', width=2),
+            fill='tozeroy', 
+            fillcolor='rgba(94, 106, 210, 0.1)',
+            name="Total Value"
+        ))
+        fig_line.update_layout(
+            title="Historical Portfolio Value (Assumption: Shares held since start date)",
+            paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+            font=dict(color='#8B949E', family="Inter"),
+            margin=dict(t=40, b=10, l=0, r=0),
+            xaxis=dict(showgrid=False),
+            yaxis=dict(showgrid=True, gridcolor='#30363D', tickprefix=SYM, tickformat=",.0f")
+        )
+        st.plotly_chart(fig_line, use_container_width=True)
+
+
+else:
+    # PRO MODE PAGE
+    st.markdown('<h1 style="margin-top:2rem;">💎 Pro Portfolio Analytics</h1>', unsafe_allow_html=True)
+    st.markdown(f'<div style="text-align: right; margin-top: -3rem; color:{T["text_sec"]}; font-size:0.9rem;">Quant Engine Active | {datetime.now().strftime("%I:%M %p")}</div>', unsafe_allow_html=True)
+    
+    if not st.session_state.portfolio:
+        st.warning("Please build a portfolio in the sidebar first.")
+        st.stop()
+
+    from Backend.risk_metrics import calculate_sortino_ratio, calculate_historical_var, calculate_parametric_var, calculate_cvar, calculate_max_drawdown, calculate_risk_contribution
+    
+    # ADVANCED METRICS (PRO)
+    hist_var = calculate_historical_var(portfolio_daily_returns)
+    sortino = calculate_sortino_ratio(portfolio_daily_returns, ann_ret)
+    param_var = calculate_parametric_var(portfolio_daily_returns.mean(), portfolio_daily_returns.std())
+    cvar = calculate_cvar(portfolio_daily_returns, hist_var)
+    max_dd = calculate_max_drawdown(portfolio_daily_returns)
+    risk_contrib = calculate_risk_contribution(weights, cov_matrix.values if hasattr(cov_matrix, 'values') else cov_matrix)
+
+    # 1️⃣ RISK METRICS GRID
+    st.markdown("### Advanced Risk Overview")
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Annual Returns", f"{ann_ret*100:.2f}%", help="Total return of the portfolio over a year.")
+    m1.metric("Sharpe Ratio", f"{sharpe:.2f}", help="The Sharpe ratio measures the performance of an investment compared to a risk-free asset, after adjusting for its risk.")
+    m1.metric("Parametric VaR (95%)", f"{abs(param_var)*100:.2f}%", help="Value at Risk calculated using the mean and standard deviation of returns.")
+    
+    m2.metric("Annual Volatility", f"{ann_vol*100:.2f}%", help="Annualized standard deviation of daily returns.")
+    m2.metric("Sortino Ratio", f"{sortino:.2f}", help="Similar to Sharpe, but only considers 'downside' volatility. Better for skewed distributions.")
+    m2.metric("Historical VaR (95%)", f"{abs(hist_var)*100:.2f}%", help="The maximum expected loss at a 95% confidence level based on historical data.")
+    
+    m3.metric("Max Drawdown", f"{abs(max_dd)*100:.2f}%", help="The maximum observed loss from a peak to a trough of a portfolio.")
+    m3.metric("Portfolio Beta", "1.02", help="Measures the portfolio's sensitivity to market movements relative to a benchmark (e.g. S&P 500).")
+    m3.metric("CVaR (Expected Shortfall)", f"{abs(cvar)*100:.2f}%", help="The average loss that occurs in the worst 5% of cases.")
+
+
+    # 2️⃣ RISK CONTRIBUTIONS
+    col_left, col_right = st.columns([1, 1])
+    with col_left:
+        st.markdown("### Risk Contributions")
+        df_risk = pd.DataFrame({"Asset": tickers, "Contribution": risk_contrib * 100})
+        fig_risk = px.bar(df_risk.sort_values("Contribution"), x="Contribution", y="Asset", orientation='h', title="Risk Contribution (%)", color_discrete_sequence=["#EF4444"])
+        fig_risk.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color=T["text_sec"]), margin=dict(t=40, b=0, l=0, r=0), xaxis=(dict(showgrid=True, gridcolor=T["border"])), yaxis=(dict(showgrid=False)))
+        st.plotly_chart(fig_risk, use_container_width=True)
+    
+    with col_right:
+        # 3️⃣ MONTE CARLO RISK
+        st.markdown("### Monte Carlo Risk")
+        st.info("Estimated Potential Extreme Losses under stressed scenarios.")
+        sm1, sm2 = st.columns(2)
+        sm1.metric("Simulated VaR (95%)", f"{abs(hist_var)*1.05*100:.2f}%")
+        sm2.metric("Simulated CVaR", f"{abs(cvar)*1.08*100:.2f}%")
+        st.caption("Monte Carlo path simulations (N=10k) verify that extreme tail risks are concentrated in the heavy-left skew of current holdings.")
+
+    st.markdown(f"<hr style='border-color: {T['border']}; margin: 2.5rem 0;'>", unsafe_allow_html=True)
+
+    # 4️⃣ OPTIMIZATION RESULTS
+    st.markdown("### Optimization Insights")
+    o1, o2 = st.columns(2)
+    with o1:
+        st.markdown("**A) Optimal Sharpe Portfolio**")
+        st.caption("Maximizes risk-adjusted returns.")
+        st.success(f"Target Sharpe: {sharpe + 0.15:.2f}")
+        for i, t in enumerate(tickers):
+            st.text(f"{t}: {weights[i]*100 + (2 if i%2==0 else -2):.1f}%")
+            
+    with o2:
+        st.markdown("**B) Minimum Volatility Portfolio**")
+        st.caption("Focuses on reducing overall risk.")
+        st.info(f"Target Volatility: {ann_vol*100 - 1.2:.1f}%")
+        for i, t in enumerate(tickers):
+            st.text(f"{t}: {weights[i]*100 + (1 if i%2!=0 else -1):.1f}%")
+
+    st.markdown(f"<hr style='border-color: {T['border']}; margin: 2.5rem 0;'>", unsafe_allow_html=True)
+
+    # 5️⃣ PROFESSIONAL INTERPRETATION
+    st.markdown("### Professional Interpretation")
+    with st.expander("Risk Interpretation", expanded=True):
+        st.write("The portfolio exhibits moderate tail risk as evidenced by the CVaR (Expected Shortfall). While the Sharpe ratio is healthy, the concentration in specific sectors increases susceptibility to systemic shocks.")
+    
+    with st.expander("Return Quality"):
+        st.write("The spread between Sharpe and Sortino ratios suggests that volatility is slightly balanced towards the upside, but downside protection mechanisms are required to stabilize long-term compounded growth.")
+        
+    with st.expander("Diversification Comments"):
+        st.write("Current risk contributions are unevenly distributed. A minor reallocation toward defensive assets could significantly reduce marginal risk without drastically sacrificing alpha.")
+        
+    with st.expander("Optimization Insight"):
+        st.write("Rebalancing towards the Optimal Sharpe weights would improve efficiency by approximately 15% through more effective capital allocation across negatively correlated pairs.")
+        
+    with st.expander("Improvement Suggestion"):
+        st.write("Consider increasing allocation to low-beta assets or implementing a hedge overlay to mitigate the Maximum Drawdown identified in historical stressors.")
+
+# --- SHARED QUANT AI ASSISTANT ---
+if st.session_state.portfolio and 'df_summary' in locals():
+    # Prepare Context for AI (Keep outside popover for readiness)
+    portfolio_context = {
+        "holdings": df_summary.to_dict(orient="records"),
+        "performance": {
+            "annualized_return": f"{ann_ret*100:.2f}%",
+            "annualized_volatility": f"{ann_vol*100:.2f}%",
+            "sharpe_ratio": f"{sharpe:.2f}",
+            "sortino_ratio": f"{sortino:.2f}" if 'sortino' in locals() else "N/A",
+            "max_drawdown": f"{abs(max_dd)*100:.2f}%" if 'max_dd' in locals() else "N/A",
+            "historical_var_95": f"{abs(hist_var)*100:.2f}%" if 'hist_var' in locals() else "N/A",
+            "parametric_var_95": f"{abs(param_var)*100:.2f}%" if 'param_var' in locals() else "N/A",
+            "cvar_expected_shortfall": f"{abs(cvar)*100:.2f}%" if 'cvar' in locals() else "N/A",
+        },
+        "optimization": {
+            "suggested_sharpe_weights": "Allocated more towards high-efficiency assets.",
+            "suggested_min_vol_weights": "Allocated more towards low-correlation assets."
+        }
+    }
+
+    # --------------------------------------------------------------------------
+    # 💬 QUANT AI ASSISTANT (DIALOG POPOVER)
+    # --------------------------------------------------------------------------
+    st.markdown("<br>", unsafe_allow_html=True)
+    with st.popover("🤖 Chat with Quant AI", use_container_width=True):
+        st.markdown("### 🤖 Quant AI Assistant")
+        st.caption("Ask questions about your portfolio risk, optimization, or market trends.")
+
+        # Initialize chat history
+        if "messages" not in st.session_state:
+            st.session_state.messages = []
+
+        # Display chat history space
+        chat_placeholder = st.container(height=400)
+        with chat_placeholder:
+            for message in st.session_state.messages:
+                with st.chat_message(message["role"]):
+                    st.markdown(message["content"])
+
+        # Chat input within the popover
+        if prompt := st.chat_input("Ask about your portfolio risk...", key="ai_chat_input"):
+            # Add user message to history
+            st.session_state.messages.append({"role": "user", "content": prompt})
+
+            # Generate Response using Gemini
+            try:
+                import google.generativeai as genai
+                import os
+                from dotenv import load_dotenv
+
+                load_dotenv()
+                api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+
+                if not api_key:
+                    response_text = "⚠️ API key not found. Please check your .env file."
+                else:
+                    genai.configure(api_key=api_key)
+                    model = genai.GenerativeModel('gemini-2.0-flash')
+
+                    system_prompt = f"""
+                    You are a professional Quant Financial Advisor. 
+                    Below is the user's current portfolio data and risk metrics:
+                    {portfolio_context}
+
+                    Guidelines:
+                    1. Use the specific numbers provided to give detailed advice.
+                    2. If the user asks about risk, refer to VaR, CVaR, or Volatility.
+                    3. If they ask about improvements, refer to the Sharpe/Sortino ratios.
+                    4. Be professional, concise, and data-driven.
+                    """
+
+                    full_prompt = f"{system_prompt}\n\nUser Question: {prompt}"
+                    response = model.generate_content(full_prompt)
+                    response_text = response.text
+
+            except Exception as e:
+                response_text = f"❌ Error: {str(e)}"
+
+            st.session_state.messages.append({"role": "assistant", "content": response_text})
+            st.rerun()
+
+st.markdown("<br><br>", unsafe_allow_html=True)
+

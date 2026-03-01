@@ -8,11 +8,10 @@ def run_monte_carlo_simulation(mean_returns, cov_matrix, weights, initial_portfo
     
     simulated_returns = simulated_returns.reshape((num_simulations, time_horizon, len(mu)))
     sim_portfolio_returns = np.dot(simulated_returns, weights)
-    cumulative_growth = np.cumprod(1 + sim_portfolio_returns, axis=1)
-    final_values = initial_portfolio_value * cumulative_growth[:, -1]
-    total_returns = (final_values / initial_portfolio_value) - 1
+    cumulative_growth = np.cumprod(1 + sim_portfolio_returns, axis=1) # (num_sim, time_horizon)
+    paths = initial_portfolio_value * cumulative_growth.T # (time_horizon, num_sim)
     
-    return total_returns
+    return paths
 
 def simulated_var_cvar(simulated_returns, confidence_level=0.95):
     alpha = 1 - confidence_level
