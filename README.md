@@ -400,6 +400,7 @@ Includes:
 - Demo Video Link: [Demo Video](https://drive.google.com/file/d/1cx1fcwWKGUQ7HwutU79fcPmHzKjGKnO4/view?usp=sharing)
 - GitHub Repository: [Github Repo](https://github.com/MOHITKOURAV01/Stock_Portfolio_Risk_Analyzer)
 - Model: [Colab Model](https://colab.research.google.com/drive/1TS-V3BQzpyRnD8z2RfCm5I5ggw4K072t?usp=sharing)
+-PPT: [PPT](https://www.canva.com/design/DAHCqkaDW08/60dbrUfDXKUhV_l_ut9uRg/edit?utm_content=DAHCqkaDW08&utm_campaign=designshare&utm_medium=link2&utm_source=sharebutton)
 
 ---
 
