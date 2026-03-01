@@ -76,18 +76,23 @@ Convert historical stock data into actionable risk insights using:
 
 ### Key Features
 
-- Portfolio input (tickers + weights)
-- Historical VaR & Parametric VaR
-- Conditional VaR (CVaR)
-- Sharpe Ratio & Sortino Ratio
-- Beta calculation
-- Correlation heatmap
-- Maximum Drawdown
-- Risk Contribution per Asset
-- Monte Carlo simulation engine
-- Efficient Frontier visualization
-- Markowitz Portfolio Optimization
-- Scenario analysis (“What if stock X drops 20%?”)
+- **Multi-Market Support:** Unified tracking for both **Indian (NSE)** and **US (NYSE/NASDAQ)** stock markets.
+- **Multi-Currency Toggle:** Real-time conversion between **USD ($)** and **INR (₹)** for consistent portfolio viewing.
+- **Smart Portfolio Import:** 
+    - Manual ticker entry with auto-complete.
+    - **Bulk Upload:** Import holdings via Excel or CSV files.
+    - **Anumati AA Integration:** Securely sync portfolio from CDSL/NSDL using Phone and PAN card (Demo Mode).
+- **Dual Analytical Modes:**
+    - **Basic Mode:** Simplified health scores and distribution charts for beginners.
+    - **Pro Analytics:** Institutional-grade metrics (VaR, CVaR, Sharpe, Beta) for advanced users.
+- **AI-Powered Insights:** 
+    - **Quant AI Assistant:** Context-aware chatbot (Gemini 2.5 Flash) to analyze your specific risk profile.
+    - Professional interpretation of complex risk data.
+- **Advanced Quantitative Engines:**
+    - Monte Carlo simulation (10k paths) for tail-risk estimation.
+    - Markowitz Mean-Variance Portfolio Optimization.
+    - Risk Contribution decomposition per asset.
+    - Historical and Parametric Value at Risk (VaR).
 
 ---
 
@@ -317,7 +322,7 @@ Includes:
 - Optimization algorithms
 
 ### Database
-- Optional: SQLite / Parquet (future scope)
+- Optional: SQLite 
 - MVP: In-memory processing
 
 ### Deployment
@@ -391,9 +396,10 @@ Includes:
 
 ## 12. Demo & Video
 
-- Live Demo Link:
-- Demo Video Link:
+- Live Demo Link: [Live Demo](https://stock-portfolio-risk-analyzer.streamlit.app/)
+- Demo Video Link: [Demo Video](https://drive.google.com/file/d/1cx1fcwWKGUQ7HwutU79fcPmHzKjGKnO4/view?usp=sharing)
 - GitHub Repository: [Github Repo](https://github.com/MOHITKOURAV01/Stock_Portfolio_Risk_Analyzer)
+- Model: [Colab Model](https://colab.research.google.com/drive/1TS-V3BQzpyRnD8z2RfCm5I5ggw4K072t?usp=sharing)
 
 ---
 
@@ -421,7 +427,6 @@ Includes:
 ### Short-Term
 - Add CVaR optimization
 - Add downside risk analysis
-- Add multi-currency support
 - Add portfolio comparison feature
 
 ### Long-Term
@@ -429,7 +434,6 @@ Includes:
 - Add factor-based modeling
 - Add real-time streaming data
 - Convert into SaaS platform
-- Add AI-driven portfolio recommendations
 
 ---
 
