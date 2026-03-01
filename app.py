@@ -655,7 +655,7 @@ if st.session_state.portfolio and 'df_summary' in locals():
                     response_text = "⚠️ API key not found. Please check your .env file."
                 else:
                     genai.configure(api_key=api_key)
-                    model = genai.GenerativeModel('gemini-2.0-flash')
+                    model = genai.GenerativeModel('gemini-2.5-flash')
 
                     system_prompt = f"""
                     You are a professional Quant Financial Advisor. 
