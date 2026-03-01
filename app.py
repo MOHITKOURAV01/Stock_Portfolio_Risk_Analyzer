@@ -203,6 +203,88 @@ with st.sidebar:
                         st.error(f"Stock '{ticker}' not found. Please check symbol.")
         else:
             st.warning("Please enter at least one stock symbol.")
+
+    st.markdown(f"<hr style='border-color: {T['border']}; margin: 1.5rem 0;'>", unsafe_allow_html=True)
+    st.markdown("#### External Data")
+    
+    with st.expander("📁 Upload Excel / CSV"):
+        uploaded_file = st.file_uploader("Choose file", type=['xlsx', 'xls', 'csv'], label_visibility="collapsed")
+        if uploaded_file:
+            try:
+                if uploaded_file.name.endswith('.csv'):
+                    df_upload = pd.read_csv(uploaded_file)
+                else:
+                    df_upload = pd.read_excel(uploaded_file)
+                
+                # Normalize column names
+                df_upload.columns = [c.strip().lower() for c in df_upload.columns]
+                
+                ticker_col = next((c for c in df_upload.columns if 'ticker' in c or 'symbol' in c or 'stock' in c), None)
+                qty_col = next((c for c in df_upload.columns if 'qty' in c or 'quantity' in c or 'units' in c or 'shares' in c), None)
+                
+                if ticker_col and qty_col:
+                    if st.button("Import from File", type="primary"):
+                        count = 0
+                        for _, row in df_upload.iterrows():
+                            t = str(row[ticker_col]).strip().upper()
+                            q = float(row[qty_col])
+                            if t and q > 0:
+                                st.session_state.portfolio[t] = st.session_state.portfolio.get(t, 0) + q
+                                count += 1
+                        st.success(f"Succesfully imported {count} holdings!")
+                        st.rerun()
+                else:
+                    st.error("Missing columns. Ensure file has 'Ticker' and 'Quantity'.")
+            except Exception as e:
+                st.error(f"Error parsing file: {str(e)}")
+
+    # 🔗 Anumati AA Integration (Mock)
+    if st.button("🔗 Connect Anumati AA", use_container_width=True):
+        st.session_state.show_aa_modal = True
+
+    # AA Consent Modal Logic
+    if st.session_state.get('show_aa_modal', False):
+        @st.dialog("Anumati Account Aggregator")
+        def aa_consent_flow():
+            st.markdown("### 🔒 Secure Data Request")
+            st.write("Anumati (by Perfios) is requesting access to your investment data from:")
+            st.markdown("- **FIP:** NSDL / CDSL (Depository)")
+            st.markdown("- **FI Types:** Equity Shares, Mutual Funds")
+            st.markdown("- **Purpose:** Portfolio Risk Analysis")
+            
+            st.info("Your data is encrypted end-to-end. The aggregator cannot see your actual holdings.")
+            
+            st.markdown("#### Verify Identity")
+            accol1, accol2 = st.columns(2)
+            phone = accol1.text_input("Mobile Number", placeholder="e.g. 9876543210")
+            pan = accol2.text_input("PAN Card", placeholder="ABCDE1234F")
+
+            col1, col2 = st.columns(2)
+            if col1.button("Deny Access", use_container_width=True):
+                st.session_state.show_aa_modal = False
+                st.rerun()
+            
+            if col2.button("Approve Consent", type="primary", use_container_width=True):
+                if not phone or not pan:
+                    st.error("Please provide both Mobile and PAN number to proceed.")
+                else:
+                    with st.spinner("Fetching data from depositories..."):
+                        import time
+                        time.sleep(1.5)
+                        # Mocking the fetched data from AA
+                        mock_aa_data = {
+                            "RELIANCE.NS": 150.0,
+                            "HDFCBANK.NS": 200.0,
+                            "INFY.NS": 120.0,
+                            "AAPL": 50.0
+                        }
+                        for t, q in mock_aa_data.items():
+                            st.session_state.portfolio[t] = st.session_state.portfolio.get(t, 0) + q
+                        st.session_state.show_aa_modal = False
+                        st.success("Portfolio synced via Anumati AA!")
+                        st.rerun()
+        
+        aa_consent_flow()
             
     if st.session_state.portfolio:
         st.markdown(f"<hr style='border-color: {T['border']}; margin: 1.5rem 0;'>", unsafe_allow_html=True)
